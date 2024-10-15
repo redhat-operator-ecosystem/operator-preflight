@@ -7,22 +7,21 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
+	"github.com/spf13/viper"
 )
 
 var _ = Describe("Check Operator", func() {
 	BeforeEach(createAndCleanupDirForArtifactsAndLogs)
 
-	Context("when running the check operator subcommand", func() {
-		Context("without the operator bundle image being provided", func() {
+	When("running the check operator subcommand", func() {
+		When("without the operator bundle image being provided", func() {
 			It("should return an error", func() {
-				_, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil))
+				_, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil, viper.New()))
 				Expect(err).To(HaveOccurred())
 			})
 		})
 
-		Context("without having set the KUBECONFIG environment variable", func() {
+		When("without having set the KUBECONFIG environment variable", func() {
 			BeforeEach(func() {
 				if val, isSet := os.LookupEnv("KUBECONFIG"); isSet {
 					DeferCleanup(os.Setenv, "KUBECONFIG", val)
@@ -30,13 +29,13 @@ var _ = Describe("Check Operator", func() {
 				os.Unsetenv("KUBECONFIG")
 			})
 			It("should return an error", func() {
-				out, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil), "quay.io/example/image:mytag")
+				out, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil, viper.New()), "quay.io/example/image:mytag")
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring("KUBECONFIG could not"))
 			})
 		})
 
-		Context("without having set the PFLT_INDEXIMAGE environment variable", func() {
+		When("without having set the PFLT_INDEXIMAGE environment variable", func() {
 			BeforeEach(func() {
 				if val, isSet := os.LookupEnv("PFLT_INDEXIMAGE"); isSet {
 					DeferCleanup(os.Setenv, "PFLT_INDEXIMAGE", val)
@@ -50,16 +49,17 @@ var _ = Describe("Check Operator", func() {
 				os.Setenv("KUBECONFIG", "foo")
 			})
 			It("should return an error", func() {
-				out, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil), "quay.io/example/image:mytag")
+				out, err := executeCommand(checkOperatorCmd(mockRunPreflightReturnNil, viper.New()), "quay.io/example/image:mytag")
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring("PFLT_INDEXIMAGE could not"))
 			})
 		})
 
-		Context("With all of the required parameters", func() {
+		When("with all of the required parameters", func() {
+			var v *viper.Viper
 			BeforeEach(func() {
-				DeferCleanup(viper.Instance().Set, "indexImage", viper.Instance().GetString("indexImage"))
-				viper.Instance().Set("indexImage", "foo")
+				v = viper.New()
+				v.Set("indexImage", "foo")
 				if val, isSet := os.LookupEnv("KUBECONFIG"); isSet {
 					DeferCleanup(os.Setenv, "KUBECONFIG", val)
 				} else {
@@ -78,21 +78,22 @@ var _ = Describe("Check Operator", func() {
 				os.Setenv("KUBECONFIG", f1.Name())
 			})
 			It("should reach the core logic, and execute the mocked RunPreflight", func() {
-				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil), logr.Discard(), "quay.io/example/image:mytag")
+				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil, v), logr.Discard(), "quay.io/example/image:mytag")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(out).ToNot(BeNil())
 			})
 			It("should reach the core logic, and execute the mocked RunPreflight and return error", func() {
-				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnErr), logr.Discard(), "quay.io/example/image:mytag")
+				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnErr, v), logr.Discard(), "quay.io/example/image:mytag")
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring("random error"))
 			})
 		})
 
-		Context("With an invalid KUBECONFIG file location", func() {
+		When("with an invalid KUBECONFIG file location", func() {
+			var v *viper.Viper
 			BeforeEach(func() {
-				DeferCleanup(viper.Instance().Set, "indexImage", viper.Instance().GetString("indexImage"))
-				viper.Instance().Set("indexImage", "foo")
+				v = viper.New()
+				v.Set("indexImage", "foo")
 				if val, isSet := os.LookupEnv("KUBECONFIG"); isSet {
 					DeferCleanup(os.Setenv, "KUBECONFIG", val)
 				} else {
@@ -102,16 +103,17 @@ var _ = Describe("Check Operator", func() {
 				os.Setenv("KUBECONFIG", "foo")
 			})
 			It("should return a no such file error", func() {
-				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil), logr.Discard(), "quay.io/example/image:mytag")
+				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil, v), logr.Discard(), "quay.io/example/image:mytag")
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring(": open foo: no such file or directory"))
 			})
 		})
 
-		Context("With a KUBECONFIG file location that is a directory", func() {
+		When("with a KUBECONFIG file location that is a directory", func() {
+			var v *viper.Viper
 			BeforeEach(func() {
-				DeferCleanup(viper.Instance().Set, "indexImage", viper.Instance().GetString("indexImage"))
-				viper.Instance().Set("indexImage", "foo")
+				v = viper.New()
+				v.Set("indexImage", "foo")
 				if val, isSet := os.LookupEnv("KUBECONFIG"); isSet {
 					DeferCleanup(os.Setenv, "KUBECONFIG", val)
 				} else {
@@ -121,15 +123,15 @@ var _ = Describe("Check Operator", func() {
 				os.Setenv("KUBECONFIG", ".")
 			})
 			It("should return an is a directory error", func() {
-				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil), logr.Discard(), "quay.io/example/image:mytag")
+				out, err := executeCommandWithLogger(checkOperatorCmd(mockRunPreflightReturnNil, v), logr.Discard(), "quay.io/example/image:mytag")
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring(": is a directory"))
 			})
 		})
 	})
 
-	Context("When checking for required environment variables", func() {
-		Context("specifically, KUBECONFIG", func() {
+	When("checking for required environment variables", func() {
+		When("specifically, KUBECONFIG", func() {
 			BeforeEach(func() {
 				if val, isSet := os.LookupEnv("KUBECONIFG"); isSet {
 					DeferCleanup(os.Setenv, "KUBECONFIG", val)
@@ -150,32 +152,36 @@ var _ = Describe("Check Operator", func() {
 			})
 		})
 
-		Context("specifically, PFLT_INDEXIMAGE", func() {
+		When("specifically, PFLT_INDEXIMAGE", func() {
+			var v *viper.Viper
 			BeforeEach(func() {
-				DeferCleanup(viper.Instance().Set, "indexImage", viper.Instance().GetString("indexImage"))
-				viper.Instance().Set("indexImage", "foo")
+				v = viper.New()
+				v.Set("indexImage", "foo")
 			})
 			It("should not encounter an error if the value is set", func() {
-				err := ensureIndexImageConfigIsSet()
+				err := ensureIndexImageConfigIsSet(v)
 				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("should encounter an error if the value is not set", func() {
-				viper.Instance().Set("indexImage", "")
-				err := ensureIndexImageConfigIsSet()
+				v.Set("indexImage", "")
+				err := ensureIndexImageConfigIsSet(v)
 				Expect(err).To(HaveOccurred())
 			})
 		})
 	})
 
-	Context("When testing positional arg parsing", func() {
+	When("testing positional arg parsing", func() {
+		var v *viper.Viper
+		var posArgs []string
+
 		// failure cases are tested earlier in this file by running executeCommand.
 		// This tests the success case using the standalone function in order
 		// to prevent trying to run the entire RunE func in previous cases.
-		posArgs := []string{"firstparam"}
 		BeforeEach(func() {
-			DeferCleanup(viper.Instance().Set, "indexImage", viper.Instance().GetString("indexImage"))
-			viper.Instance().Set("indexImage", "foo")
+			v = viper.New()
+			posArgs = append(posArgs, "first")
+			v.Set("indexImage", "foo")
 			if val, isSet := os.LookupEnv("KUBECONIFG"); isSet {
 				DeferCleanup(os.Setenv, "KUBECONFIG", val)
 			} else {
@@ -185,7 +191,7 @@ var _ = Describe("Check Operator", func() {
 		})
 
 		It("should succeed when all positional arg constraints and environment constraints are correct", func() {
-			err := checkOperatorPositionalArgs(checkOperatorCmd(mockRunPreflightReturnNil), posArgs)
+			err := checkOperatorPositionalArgs(posArgs, v)
 			Expect(err).ToNot(HaveOccurred())
 		})
 	})

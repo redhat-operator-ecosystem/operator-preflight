@@ -16,7 +16,6 @@ import (
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/log"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/policy"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/pyxis"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 
 	"github.com/go-logr/logr"
 )
@@ -29,7 +28,7 @@ type ResultWriter interface {
 
 // ResultSubmitter defines methods associated with submitting results to Red HAt.
 type ResultSubmitter interface {
-	Submit(context.Context) error
+	Submit(context.Context, string) error
 }
 
 // PyxisClient defines pyxis API interactions that are relevant to check executions in cmd.
@@ -64,7 +63,7 @@ type ContainerCertificationSubmitter struct {
 	PreflightLogFile       string
 }
 
-func (s *ContainerCertificationSubmitter) Submit(ctx context.Context) error {
+func (s *ContainerCertificationSubmitter) Submit(ctx context.Context, pyxisEnv string) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("preparing results that will be submitted to Red Hat")
 
@@ -193,9 +192,9 @@ func (s *ContainerCertificationSubmitter) Submit(ctx context.Context) error {
 	logger.Info("Test results have been submitted to Red Hat.")
 	logger.Info("These results will be reviewed by Red Hat for final certification.")
 	logger.Info(fmt.Sprintf("The container's image id is: %s.", certResults.CertImage.ID))
-	logger.Info(fmt.Sprintf("Please check %s to view test results.", BuildTestResultsURL(s.CertificationProjectID, certResults.TestResults.ID)))
-	logger.Info(fmt.Sprintf("Please check %s to view security vulnerabilities.", BuildVulnerabilitiesURL(s.CertificationProjectID, certResults.CertImage.ID)))
-	logger.Info(fmt.Sprintf("Please check %s to monitor the progress.", BuildImagesURL(s.CertificationProjectID)))
+	logger.Info(fmt.Sprintf("Please check %s to view test results.", BuildTestResultsURL(s.CertificationProjectID, certResults.TestResults.ID, pyxisEnv)))
+	logger.Info(fmt.Sprintf("Please check %s to view security vulnerabilities.", BuildVulnerabilitiesURL(s.CertificationProjectID, certResults.CertImage.ID, pyxisEnv)))
+	logger.Info(fmt.Sprintf("Please check %s to monitor the progress.", BuildImagesURL(s.CertificationProjectID, pyxisEnv)))
 
 	return nil
 }
@@ -217,7 +216,7 @@ func NewNoopSubmitter(emitLog bool, log *logr.Logger) *NoopSubmitter {
 
 var _ ResultSubmitter = &NoopSubmitter{}
 
-func (s *NoopSubmitter) Submit(ctx context.Context) error {
+func (s *NoopSubmitter) Submit(ctx context.Context, _ string) error {
 	if s.emitLog {
 		msg := "Results are not being sent for submission."
 		if s.reason != "" {
@@ -238,25 +237,24 @@ func (s *NoopSubmitter) SetReason(reason string) {
 	s.reason = reason
 }
 
-func BuildConnectURL(projectID string) string {
+func BuildConnectURL(projectID, pyxisEnv string) string {
 	connectURL := fmt.Sprintf("https://connect.redhat.com/component/view/%s", projectID)
 
-	pyxisEnv := viper.Instance().GetString("pyxis_env")
 	if len(pyxisEnv) > 0 && pyxisEnv != "prod" {
-		connectURL = fmt.Sprintf("https://connect.%s.redhat.com/component/view/%s", viper.Instance().GetString("pyxis_env"), projectID)
+		connectURL = fmt.Sprintf("https://connect.%s.redhat.com/component/view/%s", pyxisEnv, projectID)
 	}
 
 	return connectURL
 }
 
-func BuildImagesURL(projectID string) string {
-	return fmt.Sprintf("%s/images", BuildConnectURL(projectID))
+func BuildImagesURL(projectID, pyxisEnv string) string {
+	return fmt.Sprintf("%s/images", BuildConnectURL(projectID, pyxisEnv))
 }
 
-func BuildTestResultsURL(projectID string, testResultsID string) string {
-	return fmt.Sprintf("%s/certification/test-results/%s", BuildConnectURL(projectID), testResultsID)
+func BuildTestResultsURL(projectID, testResultsID, pyxisEnv string) string {
+	return fmt.Sprintf("%s/certification/test-results/%s", BuildConnectURL(projectID, pyxisEnv), testResultsID)
 }
 
-func BuildVulnerabilitiesURL(projectID string, imageID string) string {
-	return fmt.Sprintf("%s/security/vulnerabilities/%s", BuildConnectURL(projectID), imageID)
+func BuildVulnerabilitiesURL(projectID, imageID, pyxisEnv string) string {
+	return fmt.Sprintf("%s/security/vulnerabilities/%s", BuildConnectURL(projectID, pyxisEnv), imageID)
 }

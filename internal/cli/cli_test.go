@@ -28,7 +28,7 @@ var _ = Describe("CLI Library function", func() {
 	When("invoking preflight using the CLI library", func() {
 		Context("without passing in an artifact writer ", func() {
 			It("should throw an error", func() {
-				err := RunPreflight(context.TODO(), func(ctx context.Context) (certification.Results, error) { return certification.Results{}, nil }, CheckConfig{}, nil, nil, nil)
+				err := RunPreflight(context.TODO(), func(ctx context.Context) (certification.Results, error) { return certification.Results{}, nil }, CheckConfig{}, nil, nil, nil, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("no artifact writer"))
 			})
@@ -54,7 +54,7 @@ var _ = Describe("CLI Library function", func() {
 			It("Should return an error if unable to successfully check execution encounters an error", func() {
 				err := RunPreflight(testcontext, func(ctx context.Context) (certification.Results, error) {
 					return certification.Results{}, errors.New("some error")
-				}, CheckConfig{}, testFormatter, &runtime.ResultWriterFile{}, nil)
+				}, CheckConfig{}, testFormatter, &runtime.ResultWriterFile{}, nil, "prod")
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -65,7 +65,7 @@ var _ = Describe("CLI Library function", func() {
 				})
 				Expect(err).ToNot(HaveOccurred())
 
-				err = RunPreflight(testcontext, func(ctx context.Context) (certification.Results, error) { return certification.Results{}, nil }, CheckConfig{}, testFormatter, &runtime.ResultWriterFile{}, nil)
+				err = RunPreflight(testcontext, func(ctx context.Context) (certification.Results, error) { return certification.Results{}, nil }, CheckConfig{}, testFormatter, &runtime.ResultWriterFile{}, nil, "prod")
 				Expect(err).To(HaveOccurred())
 			})
 
@@ -93,7 +93,7 @@ var _ = Describe("CLI Library function", func() {
 							Failed: []certification.Result{},
 							Errors: []certification.Result{},
 						}, nil
-					}, c, testFormatter, &runtime.ResultWriterFile{}, nil)
+					}, c, testFormatter, &runtime.ResultWriterFile{}, nil, "prod")
 					Expect(err).ToNot(HaveOccurred())
 					expectedJUnitResultFile := filepath.Join(artifactWriter.Path(), "results-junit.xml")
 					Expect(expectedJUnitResultFile).To(BeAnExistingFile())
@@ -128,7 +128,7 @@ var _ = Describe("CLI Library function", func() {
 							Failed: []certification.Result{},
 							Errors: []certification.Result{},
 						}, nil
-					}, c, testFormatter, &runtime.ResultWriterFile{}, testSubmitter)
+					}, c, testFormatter, &runtime.ResultWriterFile{}, testSubmitter, "prod")
 					Expect(err).ToNot(HaveOccurred())
 
 					contents, err := io.ReadAll(buf)
@@ -161,7 +161,7 @@ var _ = Describe("CLI Library function", func() {
 							Failed: []certification.Result{},
 							Errors: []certification.Result{},
 						}, nil
-					}, c, testFormatter, &runtime.ResultWriterFile{}, &badResultSubmitter{submissionError})
+					}, c, testFormatter, &runtime.ResultWriterFile{}, &badResultSubmitter{submissionError}, "prod")
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring(submissionError))
 				})

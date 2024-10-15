@@ -11,28 +11,29 @@ import (
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/formatters"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/lib"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/runtime"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/operator"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/version"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-func checkOperatorCmd(runpreflight runPreflight) *cobra.Command {
+func checkOperatorCmd(runpreflight runPreflight, viper *viper.Viper) *cobra.Command {
 	checkOperatorCmd := &cobra.Command{
 		Use:   "operator",
 		Short: "Run checks for an Operator",
 		Long:  `This command will run the Certification checks for an Operator bundle image. `,
-		Args:  checkOperatorPositionalArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			return checkOperatorPositionalArgs(args, viper)
+		},
 		// this fmt.Sprintf is in place to keep spacing consistent with cobras two spaces that's used in: Usage, Flags, etc
 		Example: fmt.Sprintf("  %s", "preflight check operator quay.io/repo-name/operator-bundle:version"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return checkOperatorRunE(cmd, args, runpreflight)
+			return checkOperatorRunE(cmd, args, runpreflight, viper)
 		},
 	}
 
-	viper := viper.Instance()
 	checkOperatorCmd.Flags().String("namespace", "", "The namespace to use when running OperatorSDK Scorecard. (env: PFLT_NAMESPACE)")
 	_ = viper.BindPFlag("namespace", checkOperatorCmd.Flags().Lookup("namespace"))
 
@@ -66,8 +67,8 @@ func ensureKubeconfigIsSet() error {
 
 // ensureIndexImageConfigIsSet ensures that the PFLT_INDEXIMAGE environment variable has
 // a value.
-func ensureIndexImageConfigIsSet() error {
-	if catalogImage := viper.Instance().GetString("indexImage"); len(catalogImage) == 0 {
+func ensureIndexImageConfigIsSet(viper *viper.Viper) error {
+	if catalogImage := viper.GetString("indexImage"); len(catalogImage) == 0 {
 		return fmt.Errorf("environment variable PFLT_INDEXIMAGE could not be found")
 	}
 
@@ -75,7 +76,7 @@ func ensureIndexImageConfigIsSet() error {
 }
 
 // checkOperatorRunE executes checkOperator using the user args to inform the execution.
-func checkOperatorRunE(cmd *cobra.Command, args []string, runpreflight runPreflight) error {
+func checkOperatorRunE(cmd *cobra.Command, args []string, runpreflight runPreflight, viper *viper.Viper) error {
 	ctx := cmd.Context()
 	logger, err := logr.FromContext(ctx)
 	if err != nil {
@@ -86,7 +87,7 @@ func checkOperatorRunE(cmd *cobra.Command, args []string, runpreflight runPrefli
 	operatorImage := args[0]
 
 	// Render the Viper configuration as a runtime.Config
-	cfg, err := runtime.NewConfigFrom(*viper.Instance())
+	cfg, err := runtime.NewConfigFrom(*viper)
 	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -128,10 +129,11 @@ func checkOperatorRunE(cmd *cobra.Command, args []string, runpreflight runPrefli
 		formatter,
 		&runtime.ResultWriterFile{},
 		&lib.NoopSubmitter{},
+		viper.GetString("pyxis_env"),
 	)
 }
 
-func checkOperatorPositionalArgs(cmd *cobra.Command, args []string) error {
+func checkOperatorPositionalArgs(args []string, viper *viper.Viper) error {
 	if len(args) != 1 {
 		return fmt.Errorf("an operator bundle image positional argument is required")
 	}
@@ -140,7 +142,7 @@ func checkOperatorPositionalArgs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := ensureIndexImageConfigIsSet(); err != nil {
+	if err := ensureIndexImageConfigIsSet(viper); err != nil {
 		return err
 	}
 

@@ -22,7 +22,6 @@ import (
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/log"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/option"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/runtime"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/version"
 
 	"github.com/go-logr/logr"
@@ -31,30 +30,32 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 var submit bool
 
 // runPreflight is introduced to make testing of this command possible, it has the same method signature as cli.RunPreflight.
-type runPreflight func(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter) error
+type runPreflight func(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter, string) error
 
-func checkContainerCmd(runpreflight runPreflight) *cobra.Command {
+func checkContainerCmd(runpreflight runPreflight, viper *viper.Viper) *cobra.Command {
 	checkContainerCmd := &cobra.Command{
 		Use:   "container",
 		Short: "Run checks for a container",
 		Long:  `This command will run the Certification checks for a container image. `,
-		Args:  checkContainerPositionalArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			return checkContainerPositionalArgs(cmd, args, viper)
+		},
 		// this fmt.Sprintf is in place to keep spacing consistent with cobras two spaces that's used in: Usage, Flags, etc
 		Example: fmt.Sprintf("  %s", "preflight check container quay.io/repo-name/container-name:version"),
-		PreRunE: validateCertificationProjectID,
+		PreRunE: checkContainerPreRunE,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return checkContainerRunE(cmd, args, runpreflight)
+			return checkContainerRunE(cmd, args, runpreflight, viper)
 		},
 	}
 
 	flags := checkContainerCmd.Flags()
 
-	viper := viper.Instance()
 	flags.BoolVarP(&submit, "submit", "s", false, "submit check container results to Red Hat")
 	_ = viper.BindPFlag("submit", flags.Lookup("submit"))
 
@@ -93,7 +94,7 @@ func checkContainerCmd(runpreflight runPreflight) *cobra.Command {
 }
 
 // checkContainerRunE executes checkContainer using the user args to inform the execution.
-func checkContainerRunE(cmd *cobra.Command, args []string, runpreflight runPreflight) error {
+func checkContainerRunE(cmd *cobra.Command, args []string, runpreflight runPreflight, viper *viper.Viper) error {
 	ctx := cmd.Context()
 	logger, err := logr.FromContext(ctx)
 	if err != nil {
@@ -104,7 +105,7 @@ func checkContainerRunE(cmd *cobra.Command, args []string, runpreflight runPrefl
 	containerImage := args[0]
 
 	// Render the Viper configuration as a runtime.Config
-	cfg, err := runtime.NewConfigFrom(*viper.Instance())
+	cfg, err := runtime.NewConfigFrom(*viper)
 	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -155,6 +156,7 @@ func checkContainerRunE(cmd *cobra.Command, args []string, runpreflight runPrefl
 			formatter,
 			&runtime.ResultWriterFile{},
 			resultSubmitter,
+			viper.GetString("pyxis_env"),
 		); err != nil {
 			return err
 		}
@@ -197,7 +199,7 @@ func checkContainerRunE(cmd *cobra.Command, args []string, runpreflight runPrefl
 	return nil
 }
 
-func checkContainerPositionalArgs(cmd *cobra.Command, args []string) error {
+func checkContainerPositionalArgs(cmd *cobra.Command, args []string, viper *viper.Viper) error {
 	if len(args) != 1 {
 		return fmt.Errorf("a container image positional argument is required")
 	}
@@ -211,7 +213,6 @@ func checkContainerPositionalArgs(cmd *cobra.Command, args []string) error {
 	})
 
 	// --submit was specified
-	viper := viper.Instance()
 	if submit {
 		// If the flag is not marked as changed AND viper hasn't gotten it from environment, it's an error
 		if !cmd.Flag("certification-project-id").Changed && !viper.IsSet("certification_project_id") {
@@ -238,24 +239,34 @@ func checkContainerPositionalArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func checkContainerPreRunE(cmd *cobra.Command, args []string) error {
+	certificationProjectID := viper.GetString("certification_project_id")
+	validatedCertificationProjectID, err := validateCertificationProjectID(certificationProjectID)
+	if err != nil {
+		return err
+	}
+	if validatedCertificationProjectID != certificationProjectID {
+		viper.Set("certification_project_id", validatedCertificationProjectID)
+	}
+	return nil
+}
+
 // validateCertificationProjectID validates that the certification project id is in the proper format
 // and throws an error if the value provided is in a legacy format that is not usable to query pyxis
-func validateCertificationProjectID(cmd *cobra.Command, args []string) error {
-	viper := viper.Instance()
-	certificationProjectID := viper.GetString("certification_project_id")
+func validateCertificationProjectID(certificationProjectID string) (string, error) {
 	// splitting the certification project id into parts. if there are more than 2 elements in the array,
 	// we know they inputted a legacy project id, which can not be used to query pyxis
 	parts := strings.Split(certificationProjectID, "-")
 
 	if len(parts) > 2 {
-		return fmt.Errorf("certification project id: %s is improperly formatted see help command for instructions on obtaining proper value", certificationProjectID)
+		return certificationProjectID, fmt.Errorf("certification project id: %s is improperly formatted see help command for instructions on obtaining proper value", certificationProjectID)
 	}
 
 	if parts[0] == "ospid" {
-		viper.Set("certification_project_id", parts[1])
+		return parts[1], nil
 	}
 
-	return nil
+	return certificationProjectID, nil
 }
 
 // generateContainerCheckOptions returns appropriate container.Options based on cfg.

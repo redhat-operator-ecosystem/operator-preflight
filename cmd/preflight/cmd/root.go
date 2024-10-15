@@ -8,43 +8,40 @@ import (
 	"path/filepath"
 
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/artifacts"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/version"
 
 	"github.com/bombsimon/logrusr/v4"
 	"github.com/go-logr/logr"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	spfviper "github.com/spf13/viper"
+	"github.com/spf13/viper"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var configFileUsed bool
 
-func init() {
-	cobra.OnInitialize(func() { initConfig(viper.Instance()) })
-}
-
-func rootCmd() *cobra.Command {
+func rootCmd(viper *viper.Viper) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:              "preflight",
-		Short:            "Preflight Red Hat certification prep tool.",
-		Long:             "A utility that allows you to pre-test your bundles, operators, and container before submitting for Red Hat Certification.",
-		Version:          version.Version.String(),
-		Args:             cobra.MinimumNArgs(1),
-		PersistentPreRun: preRunConfig,
+		Use:     "preflight",
+		Short:   "Preflight Red Hat certification prep tool.",
+		Long:    "A utility that allows you to pre-test your bundles, operators, and container before submitting for Red Hat Certification.",
+		Version: version.Version.String(),
+		Args:    cobra.MinimumNArgs(1),
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			preRunConfig(cmd, viper)
+		},
 	}
 
-	viper := viper.Instance()
 	rootCmd.PersistentFlags().String("config", "", "A preflight config file. The default is config.yaml (env: PFLT_CONFIG)")
 	_ = viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config"))
+
 	rootCmd.PersistentFlags().String("logfile", "", "Where the execution logfile will be written. (env: PFLT_LOGFILE)")
 	_ = viper.BindPFlag("logfile", rootCmd.PersistentFlags().Lookup("logfile"))
 
 	rootCmd.PersistentFlags().String("loglevel", "", "The verbosity of the preflight tool itself. Ex. warn, debug, trace, info, error. (env: PFLT_LOGLEVEL)")
 	_ = viper.BindPFlag("loglevel", rootCmd.PersistentFlags().Lookup("loglevel"))
 
-	rootCmd.AddCommand(checkCmd())
+	rootCmd.AddCommand(checkCmd(viper))
 	rootCmd.AddCommand(listChecksCmd())
 	rootCmd.AddCommand(runtimeAssetsCmd())
 	rootCmd.AddCommand(supportCmd())
@@ -52,47 +49,47 @@ func rootCmd() *cobra.Command {
 	return rootCmd
 }
 
-func Execute() error {
-	return rootCmd().ExecuteContext(context.Background())
+func Execute(ctx context.Context, viper *viper.Viper) error {
+	initConfig(viper)
+	return rootCmd(viper).ExecuteContext(ctx)
 }
 
-func initConfig(viper *spfviper.Viper) {
+func initConfig(v *viper.Viper) {
 	// set up ENV var support
-	viper.SetEnvPrefix("pflt")
-	viper.AutomaticEnv()
+	v.SetEnvPrefix("pflt")
+	v.AutomaticEnv()
 
 	// set up optional config file support
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(".")
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(".")
 
 	configFileUsed = true
-	if viper.GetString("config") != "" {
-		viper.SetConfigFile(viper.GetString("config"))
+	if v.GetString("config") != "" {
+		v.SetConfigFile(v.GetString("config"))
 	}
 
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(spfviper.ConfigFileNotFoundError); ok {
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			configFileUsed = false
 		}
 	}
 
 	// Set up logging config defaults
-	viper.SetDefault("logfile", DefaultLogFile)
-	viper.SetDefault("loglevel", DefaultLogLevel)
-	viper.SetDefault("artifacts", artifacts.DefaultArtifactsDir)
+	v.SetDefault("logfile", DefaultLogFile)
+	v.SetDefault("loglevel", DefaultLogLevel)
+	v.SetDefault("artifacts", artifacts.DefaultArtifactsDir)
 
 	// Set up cluster defaults
-	viper.SetDefault("namespace", DefaultNamespace)
-	viper.SetDefault("serviceaccount", DefaultServiceAccount)
+	v.SetDefault("namespace", DefaultNamespace)
+	v.SetDefault("serviceaccount", DefaultServiceAccount)
 
 	// Set up scorecard wait time default
-	viper.SetDefault("scorecard_wait_time", DefaultScorecardWaitTime)
+	v.SetDefault("scorecard_wait_time", DefaultScorecardWaitTime)
 }
 
 // preRunConfig is used by cobra.PreRun in all non-root commands to load all necessary configurations
-func preRunConfig(cmd *cobra.Command, args []string) {
-	viper := viper.Instance()
+func preRunConfig(cmd *cobra.Command, viper *viper.Viper) {
 	l := logrus.New()
 	l.SetFormatter(&logrus.TextFormatter{DisableColors: true})
 

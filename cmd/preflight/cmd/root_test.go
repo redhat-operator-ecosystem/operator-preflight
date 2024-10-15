@@ -8,14 +8,13 @@ import (
 
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/artifacts"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/cli"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
-	spfviper "github.com/spf13/viper"
+	"github.com/spf13/viper"
 )
 
 // executeCommand is used for cobra command testing. It is effectively what's seen here:
@@ -53,7 +52,7 @@ var _ = Describe("cmd package utility functions", func() {
 	Describe("Get the root command", func() {
 		Context("when calling the root command function", func() {
 			It("should return a root command", func() {
-				cmd := rootCmd()
+				cmd := rootCmd(viper.New())
 				Expect(cmd).ToNot(BeNil())
 				Expect(cmd.Commands()).ToNot(BeEmpty())
 			})
@@ -73,11 +72,11 @@ var _ = Describe("cmd package utility functions", func() {
 	)
 
 	Describe("Initialize Viper configuration", func() {
-		var testViper *spfviper.Viper
+		var testViper *viper.Viper
 		BeforeEach(func() {
-			testViper = spfviper.New()
+			testViper = viper.New()
 		})
-		Context("when initConfig is called", func() {
+		When("initConfig() is called", func() {
 			Context("and no envvars are set", func() {
 				It("should have defaults set correctly", func() {
 					initConfig(testViper)
@@ -105,7 +104,9 @@ var _ = Describe("cmd package utility functions", func() {
 				})
 			})
 			When("a config file is present", func() {
+				var testViper *viper.Viper
 				BeforeEach(func() {
+					testViper = viper.New()
 					fs := afero.NewMemMapFs()
 					testViper.SetFs(fs)
 					configFile := `namespace: configspace
@@ -119,9 +120,8 @@ loglevel: configloglevel`
 					cwd, err := os.Getwd()
 					Expect(err).ToNot(HaveOccurred())
 					Expect(afero.WriteFile(fs, filepath.Join(cwd, "config.yaml"), bytes.NewBufferString(configFile).Bytes(), 0o644)).To(Succeed())
-					DeferCleanup(testViper.SetFs, afero.NewOsFs())
 				})
-				It("should read all of the config", func() {
+				It("should read config from a file", func() {
 					initConfig(testViper)
 					Expect(testViper.GetString("namespace")).To(Equal("configspace"))
 					Expect(testViper.GetString("artifacts")).To(Equal("configartifacts"))
@@ -134,22 +134,30 @@ loglevel: configloglevel`
 
 	Describe("Pre-run configuration", func() {
 		var cmd *cobra.Command
+		var testViper *viper.Viper
+		var tmpDir string
 		BeforeEach(func() {
+			testViper = viper.New()
 			cmd = &cobra.Command{
-				PersistentPreRun: preRunConfig,
-				Run:              func(cmd *cobra.Command, args []string) {},
+				PersistentPreRun: func(cmd *cobra.Command, args []string) {
+					preRunConfig(cmd, testViper)
+				},
+				Run: func(cmd *cobra.Command, args []string) {},
 			}
+			var err error
+			tmpDir, err = os.MkdirTemp("", "prerun-config-*")
+			Expect(err).ToNot(HaveOccurred())
+			DeferCleanup(os.RemoveAll, tmpDir)
 		})
 		Context("configuring a Cobra Command", func() {
-			var tmpDir string
 			BeforeEach(func() {
 				var err error
 				tmpDir, err = os.MkdirTemp("", "prerun-config-*")
 				Expect(err).ToNot(HaveOccurred())
 				DeferCleanup(os.RemoveAll, tmpDir)
 
-				viper.Instance().Set("logfile", filepath.Join(tmpDir, "foo.log"))
-				DeferCleanup(viper.Instance().Set, "logfile", "preflight.log")
+				testViper.Set("logfile", filepath.Join(tmpDir, "foo.log"))
+				DeferCleanup(testViper.Set, "logfile", "preflight.log")
 			})
 			It("should create the logfile", func() {
 				Expect(cmd.ExecuteContext(context.TODO())).To(Succeed())
@@ -158,7 +166,6 @@ loglevel: configloglevel`
 			})
 		})
 		Context("with the offline flag", func() {
-			var tmpDir string
 			BeforeEach(func() {
 				var err error
 				tmpDir, err = os.MkdirTemp("", "prerun-artifacts-*")
@@ -169,14 +176,9 @@ loglevel: configloglevel`
 				Expect(err).ToNot(HaveOccurred())
 				DeferCleanup(os.RemoveAll, tmpLogDir)
 
-				viper.Instance().Set("artifacts", tmpDir)
-				DeferCleanup(viper.Instance().Set, "artifacts", artifacts.DefaultArtifactsDir)
-
-				viper.Instance().Set("logfile", filepath.Join(tmpLogDir, "preflight.log"))
-				DeferCleanup(viper.Instance().Set, "logfile", DefaultLogFile)
-
-				viper.Instance().Set("offline", true)
-				DeferCleanup(viper.Instance().Set, "offline", false)
+				testViper.Set("artifacts", tmpDir)
+				testViper.Set("logfile", filepath.Join(tmpLogDir, "preflight.log"))
+				testViper.Set("offline", true)
 			})
 			It("should create the logfile in the artifacts directory", func() {
 				Expect(cmd.ExecuteContext(context.TODO())).To(Succeed())

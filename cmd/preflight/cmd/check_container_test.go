@@ -13,13 +13,11 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/artifacts"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/certification"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/check"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/cli"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/formatters"
 	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/lib"
-	"github.com/redhat-openshift-ecosystem/openshift-preflight/internal/viper"
 
 	"github.com/go-logr/logr"
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -33,6 +31,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	"github.com/spf13/afero"
+	"github.com/spf13/viper"
 )
 
 func createPlatformImage(arch string, addlLayers int) cranev1.Image {
@@ -122,8 +122,14 @@ var _ = Describe("Check Container Command", func() {
 
 	When("a manifest list is passed", func() {
 		When("default params otherwise", func() {
+			var v *viper.Viper
+
+			BeforeEach(func() {
+				v = viper.New()
+			})
+
 			It("should not error", func() {
-				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil), logr.Discard(), manifestListSrc)
+				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil, v), logr.Discard(), manifestListSrc)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -131,11 +137,12 @@ var _ = Describe("Check Container Command", func() {
 
 	DescribeTable("--platform tests",
 		func(manifestKey string, platform string, match types.GomegaMatcher, includePlatformArg bool) {
+			v := viper.New()
 			args := []string{manifests[manifestKey]}
 			if includePlatformArg {
 				args = append(args, "--platform", platform)
 			}
-			_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil), logr.Discard(), args...)
+			_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil, v), logr.Discard(), args...)
 			Expect(err).To(match)
 		},
 		Entry("image manifest, valid platform", "image", "amd64", Not(HaveOccurred()), true),
@@ -145,24 +152,24 @@ var _ = Describe("Check Container Command", func() {
 		Entry("index manifest, invalid platform", "index", "none", HaveOccurred(), true),
 	)
 
-	Context("When validating check container arguments and flags", func() {
+	When("validating check container arguments and flags", func() {
 		Context("and the user provided more than 1 positional arg", func() {
 			It("should fail to run", func() {
-				_, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil), "foo", "bar")
+				_, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil, viper.New()), "foo", "bar")
 				Expect(err).To(HaveOccurred())
 			})
 		})
 
-		Context("and the user provided less than 1 positional arg", func() {
+		When("the user provided less than 1 positional arg", func() {
 			It("should fail to run", func() {
-				_, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil))
+				_, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil, viper.New()))
 				Expect(err).To(HaveOccurred())
 			})
 		})
 
 		DescribeTable("and the user has enabled the submit flag",
 			func(errString string, args []string) {
-				out, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil), args...)
+				out, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil, viper.New()), args...)
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring(errString))
 			},
@@ -177,6 +184,11 @@ var _ = Describe("Check Container Command", func() {
 		)
 
 		When("the user enables the submit flag", func() {
+			var v *viper.Viper
+
+			BeforeEach(func() {
+				v = viper.New()
+			})
 			When("environment variables are used for certification ID and api token", func() {
 				BeforeEach(func() {
 					os.Setenv("PFLT_CERTIFICATION_PROJECT_ID", "certid")
@@ -185,101 +197,75 @@ var _ = Describe("Check Container Command", func() {
 					DeferCleanup(os.Unsetenv, "PFLT_PYXIS_API_TOKEN")
 				})
 				It("should still execute with no error", func() {
+					initConfig(v)
 					submit = true
-
-					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil, v), []string{"foo"}, v)
 					Expect(err).ToNot(HaveOccurred())
-					Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("tokenid"))
-					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("certid"))
+					Expect(v.GetString("pyxis_api_token")).To(Equal("tokenid"))
+					Expect(v.GetString("certification_project_id")).To(Equal("certid"))
 				})
 			})
 			When("a config file is used", func() {
 				BeforeEach(func() {
+					fs := afero.NewMemMapFs()
+					v.SetFs(fs)
 					config := `pyxis_api_token: mytoken
 certification_project_id: mycertid`
-					tempDir, err := os.MkdirTemp("", "check-container-submit-*")
-					Expect(err).ToNot(HaveOccurred())
-					err = os.WriteFile(filepath.Join(tempDir, "config.yaml"), bytes.NewBufferString(config).Bytes(), 0o644)
-					Expect(err).ToNot(HaveOccurred())
-					viper.Instance().AddConfigPath(tempDir)
-					DeferCleanup(os.RemoveAll, tempDir)
+					Expect(afero.WriteFile(fs, "/config/config.yaml", bytes.NewBufferString(config).Bytes(), 0o644)).To(Succeed())
+					v.AddConfigPath("/config")
 				})
 				It("should still execute with no error", func() {
 					// Make sure that we've read the config file
-					initConfig(viper.Instance())
+					initConfig(v)
 					submit = true
 
-					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil, v), []string{"foo"}, v)
 					Expect(err).ToNot(HaveOccurred())
-					Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("mytoken"))
-					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("mycertid"))
+					Expect(v.GetString("pyxis_api_token")).To(Equal("mytoken"))
+					Expect(v.GetString("certification_project_id")).To(Equal("mycertid"))
 				})
 			})
 		})
 	})
 
-	Context("When validating the certification-project-id flag", func() {
-		Context("and the flag is set properly", func() {
-			BeforeEach(func() {
-				viper.Instance().Set("certification_project_id", "123456789")
-				DeferCleanup(viper.Instance().Set, "certification_project_id", "")
-			})
-			It("should not change the flag value", func() {
-				err := validateCertificationProjectID(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+	DescribeTable("validating the certification-project-id flag",
+		func(value, expected string, succeed bool) {
+			updated, err := validateCertificationProjectID(value)
+			if succeed {
 				Expect(err).ToNot(HaveOccurred())
-				Expect(viper.Instance().GetString("certification_project_id")).To(Equal("123456789"))
-			})
-		})
-		Context("and a valid ospid format is provided", func() {
-			BeforeEach(func() {
-				viper.Instance().Set("certification_project_id", "ospid-123456789")
-				DeferCleanup(viper.Instance().Set, "certification_project_id", "")
-			})
-			It("should strip ospid- from the flag value", func() {
-				err := validateCertificationProjectID(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
-				Expect(err).ToNot(HaveOccurred())
-				Expect(viper.Instance().GetString("certification_project_id")).To(Equal("123456789"))
-			})
-		})
-		Context("and a legacy format with ospid is provided", func() {
-			BeforeEach(func() {
-				viper.Instance().Set("certification_project_id", "ospid-62423-f26c346-6cc1dc7fae92")
-				DeferCleanup(viper.Instance().Set, "certification_project_id", "")
-			})
-			It("should throw an error", func() {
-				err := validateCertificationProjectID(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
-				Expect(err).To(HaveOccurred())
-			})
-		})
-		Context("and a legacy format without ospid is provided", func() {
-			BeforeEach(func() {
-				viper.Instance().Set("certification_project_id", "62423-f26c346-6cc1dc7fae92")
-				DeferCleanup(viper.Instance().Set, "certification_project_id", "")
-			})
-			It("should throw an error", func() {
-				err := validateCertificationProjectID(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
-				Expect(err).To(HaveOccurred())
-			})
-		})
-	})
+				Expect(updated).To(Equal(expected))
+				return
+			}
+			Expect(err).To(HaveOccurred())
+		},
+		Entry("the flag is set properly should not change value", "123456789", "123456789", true),
+		Entry("a valid ospid should strip ospid-", "ospid-123456789", "123456789", true),
+		Entry("legacy format with ospid", "ospid-62423-f26c346-6cc1dc7fae92", "", false),
+		Entry("legacy format without ospid", "62423-f26c346-6cc1dc7fae92", "", false),
+	)
 
-	Context("when running the check container subcommand with a logger provided", func() {
-		Context("with all of the required parameters", func() {
+	When("running the check container subcommand with a logger provided", func() {
+		When("with all of the required parameters", func() {
 			It("should reach the core logic, and execute the mocked RunPreflight", func() {
-				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil), logr.Discard(), src)
+				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil, viper.New()), logr.Discard(), src)
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
-		Context("with all of the required parameters with error mocked", func() {
+		When("with all of the required parameters with error mocked", func() {
 			It("should reach the core logic, and execute the mocked RunPreflight and return error", func() {
-				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnErr), logr.Discard(), src)
+				_, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnErr, viper.New()), logr.Discard(), src)
 				Expect(err).To(HaveOccurred())
 			})
 		})
 	})
 
-	Context("when running the check container subcommand with a offline config provided", func() {
-		Context("with all of the required parameters", func() {
+	When("running the check container subcommand with a offline config provided", func() {
+		var v *viper.Viper
+
+		BeforeEach(func() {
+			v = viper.New()
+		})
+		When("with all of the required parameters", func() {
 			BeforeEach(func() {
 				tmpDir, err := os.MkdirTemp("", "preflight-submit-test-*")
 				Expect(err).ToNot(HaveOccurred())
@@ -297,19 +283,16 @@ certification_project_id: mycertid`
 				Expect(err).ToNot(HaveOccurred())
 				defer f2.Close()
 
-				viper.Instance().Set("artifacts", tmpDir)
-				DeferCleanup(viper.Instance().Set, "artifacts", artifacts.DefaultArtifactsDir)
-
-				viper.Instance().Set("offline", true)
-				DeferCleanup(viper.Instance().Set, "offline", false)
+				v.Set("artifacts", tmpDir)
+				v.Set("offline", true)
 			})
 			It("should reach core logic, and the additional offline logic", func() {
-				out, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil), logr.Discard(), src)
+				out, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil, v), logr.Discard(), src)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(out).ToNot(BeNil())
 			})
 		})
-		Context("when an existing artifacts.tar already on disk", func() {
+		When("an existing artifacts.tar already on disk", func() {
 			BeforeEach(func() {
 				tmpDir, err := os.MkdirTemp("", "preflight-submit-test-*")
 				Expect(err).ToNot(HaveOccurred())
@@ -332,41 +315,38 @@ certification_project_id: mycertid`
 				Expect(err).ToNot(HaveOccurred())
 				defer f3.Close()
 
-				viper.Instance().Set("artifacts", tmpDir)
-				DeferCleanup(viper.Instance().Set, "artifacts", artifacts.DefaultArtifactsDir)
-
-				viper.Instance().Set("offline", true)
-				DeferCleanup(viper.Instance().Set, "offline", false)
+				v.Set("artifacts", tmpDir)
+				v.Set("offline", true)
 			})
 			It("should reach the additional offline logic, and remove existing tar file", func() {
-				out, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil), logr.Discard(), src)
+				out, err := executeCommandWithLogger(checkContainerCmd(mockRunPreflightReturnNil, v), logr.Discard(), src)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(out).ToNot(BeNil())
 			})
 		})
 	})
 
-	Context("when artifactsTar is called directly", func() {
-		Context("and the src does not exist", func() {
+	When("artifactsTar is called directly", func() {
+		When("the src does not exist", func() {
 			It("should get an unable to tar files error", func() {
 				err := artifactsTar(context.Background(), "", nil)
 				Expect(err).To(HaveOccurred())
 			})
 		})
-		Context("and a bad writer is passed", func() {
+		When("a bad writer is passed", func() {
 			It("should get an error with trying to write the header", func() {
 				err := artifactsTar(context.Background(), ".", errWriter(0))
 				Expect(err).To(HaveOccurred())
 			})
 		})
-		Context("and a src has no permissions", func() {
+		When("a src has no permissions", func() {
 			var tmpDir string
 			var err error
 			var buf bytes.Buffer
 			JustBeforeEach(func() {
 				tmpDir, err = os.MkdirTemp("", "preflight-submit-test-*")
 				Expect(err).ToNot(HaveOccurred())
-				err = os.Chmod(tmpDir, 0o00)
+				err = os.Chmod(tmpDir, 0o000)
 				Expect(err).ToNot(HaveOccurred())
 				DeferCleanup(os.RemoveAll, tmpDir)
 			})
@@ -375,7 +355,7 @@ certification_project_id: mycertid`
 				Expect(err).To(HaveOccurred())
 			})
 		})
-		Context("and src only contains another directory", func() {
+		When("and src only contains another directory", func() {
 			var tmpDir string
 			var err error
 			var buf bytes.Buffer
@@ -394,10 +374,10 @@ certification_project_id: mycertid`
 	})
 })
 
-func mockRunPreflightReturnNil(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter) error {
+func mockRunPreflightReturnNil(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter, string) error {
 	return nil
 }
 
-func mockRunPreflightReturnErr(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter) error {
+func mockRunPreflightReturnErr(context.Context, func(ctx context.Context) (certification.Results, error), cli.CheckConfig, formatters.ResponseFormatter, lib.ResultWriter, lib.ResultSubmitter, string) error {
 	return errors.New("random error")
 }

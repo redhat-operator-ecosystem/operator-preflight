@@ -31,6 +31,7 @@ func RunPreflight(
 	formatter formatters.ResponseFormatter,
 	rw lib.ResultWriter,
 	rs lib.ResultSubmitter,
+	pyxisEnv string,
 ) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -77,7 +78,7 @@ func RunPreflight(
 	}
 
 	if cfg.SubmitResults {
-		if err := rs.Submit(ctx); err != nil {
+		if err := rs.Submit(ctx, pyxisEnv); err != nil {
 			return err
 		}
 	}

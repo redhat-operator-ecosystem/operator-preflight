@@ -153,13 +153,13 @@ var _ = Describe("The NoopSubmitter", func() {
 			It("should include the reason in the emitted log if specified", func() {
 				testReason := "test reason"
 				noop.SetReason(testReason)
-				err := noop.Submit(context.TODO())
+				err := noop.Submit(context.TODO(), "prod")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(bf.String()).To(ContainSubstring(testReason))
 			})
 
 			It("should emit logs when calling submit", func() {
-				err := noop.Submit(context.TODO())
+				err := noop.Submit(context.TODO(), "prod")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(bf.String()).To(ContainSubstring("Results are not being sent for submission."))
 			})
@@ -168,7 +168,7 @@ var _ = Describe("The NoopSubmitter", func() {
 		Context("and disabling log emitting", func() {
 			It("should not emit logs when calling submit", func() {
 				noop.SetEmitLog(false)
-				err := noop.Submit(context.TODO())
+				err := noop.Submit(context.TODO(), "prod")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(bf.String()).To(BeEmpty())
 			})
@@ -247,7 +247,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				fakePC.getProjectsFunc = gpFuncReturnError
 			})
 			It("should throw an error", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 			})
 		})
@@ -257,7 +257,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(dockerConfigPath)
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(dockerconfigFilename))
 			})
@@ -273,7 +273,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(dockerConfigPath)
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -284,7 +284,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				fakePC.getProjectsFunc = gpFuncReturnHostedRegistry
 			})
 			It("should not throw an error", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -294,7 +294,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(path.Join(aw.Path(), check.DefaultCertImageFilename))
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(check.DefaultCertImageFilename))
 			})
@@ -305,7 +305,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(path.Join(aw.Path(), check.DefaultTestResultsFilename))
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(check.DefaultTestResultsFilename))
 			})
@@ -316,7 +316,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(path.Join(aw.Path(), check.DefaultRPMManifestFilename))
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(check.DefaultRPMManifestFilename))
 			})
@@ -331,7 +331,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(path.Join(aw.Path(), check.DefaultRPMManifestFilename))
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -341,7 +341,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				err := os.Remove(preflightLogPath)
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sbmt.Submit(testcontext)
+				err = sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring(preflightLogFilename))
 			})
@@ -354,7 +354,7 @@ var _ = Describe("Container Certification Submitter", func() {
 			})
 
 			It("should throw an error", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 			})
 		})
@@ -365,7 +365,7 @@ var _ = Describe("Container Certification Submitter", func() {
 			})
 
 			It("should throw an error", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 			})
 		})
@@ -378,7 +378,7 @@ var _ = Describe("Container Certification Submitter", func() {
 			})
 
 			It("should throw an error finalizing the submission", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("unable to finalize data"))
 			})
@@ -390,7 +390,7 @@ var _ = Describe("Container Certification Submitter", func() {
 				fakePC.getProjectsFunc = gpFuncReturnScratchException
 			})
 			It("should not throw an error", func() {
-				err := sbmt.Submit(testcontext)
+				err := sbmt.Submit(testcontext, "prod")
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
