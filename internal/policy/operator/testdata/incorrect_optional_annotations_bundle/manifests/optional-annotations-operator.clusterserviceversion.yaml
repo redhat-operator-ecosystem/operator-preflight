@@ -150,29 +150,6 @@ spec:
                                 - linux
                 containers:
                   - args:
-                      - --secure-listen-address=0.0.0.0:8443
-                      - --upstream=http://127.0.0.1:8080/
-                      - --logtostderr=true
-                      - --v=0
-                    image: gcr.io/kubebuilder/kube-rbac-proxy@sha256:d99a8d144816b951a67648c12c0b988936ccd25cf3754f3cd85ab8c01592248f
-                    name: kube-rbac-proxy
-                    ports:
-                      - containerPort: 8443
-                        name: https
-                        protocol: TCP
-                    resources:
-                      limits:
-                        cpu: 500m
-                        memory: 128Mi
-                      requests:
-                        cpu: 5m
-                        memory: 64Mi
-                    securityContext:
-                      allowPrivilegeEscalation: false
-                      capabilities:
-                        drop:
-                          - ALL
-                  - args:
                       - --health-probe-bind-address=:8081
                       - --metrics-bind-address=127.0.0.1:8080
                       - --leader-elect
@@ -276,8 +253,6 @@ spec:
   relatedImages:
     - image: quay.io/fedora/fedora@sha256:ce08a91085403ecbc637eb2a96bd3554d75537871a12a14030b89243501050f2
       name: fedora
-    - image: gcr.io/kubebuilder/kube-rbac-proxy@sha256:d99a8d144816b951a67648c12c0b988936ccd25cf3754f3cd85ab8c01592248f
-      name: kube-rbac-proxy
     - image: quay.io/opdev/optional-annotations-operator-cm@sha256:b4d060da584f7f5f7935e8fb78a0b62b1abb829717ad522190ac7747abd9fbd1
       name: manager
   version: 0.0.1
