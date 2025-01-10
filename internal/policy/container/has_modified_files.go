@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,7 +48,7 @@ func (pm packageMeta) Compare(other packageMeta) int {
 
 type packageFilesRef struct {
 	// LayerFiles contains a slice of files created/modified in layer
-	LayerFiles []string
+	LayerFiles map[string]fileInfo
 	// LayerPackages is a map of the packages in a layer. The key is
 	// the NVR of the package. The value is metadata about the package
 	// that we use for processing
@@ -214,7 +215,9 @@ func (p *HasModifiedFilesCheck) validate(ctx context.Context, layerIDs []string,
 	for idx, layerID := range layerIDs {
 		logger := logger.WithValues("layer", layerID)
 		ref := packageFiles[layerID]
-		for _, modifiedFile := range ref.LayerFiles {
+		for modifiedFile, modifiedFileInfo := range ref.LayerFiles {
+			logger := logger.WithValues("file", modifiedFile)
+
 			// If it's a modifiedFile but this layer has an RPM db, that's allowed, but only if the
 			// package itself is updated.
 			if idx == 0 && ref.HasRPMDB {
@@ -235,6 +238,16 @@ func (p *HasModifiedFilesCheck) validate(ctx context.Context, layerIDs []string,
 			currentPackage := ref.LayerPackages[currentPackageVersion]
 
 			if previousPackageVersion == currentPackageVersion {
+				previousFileInfo := packageFiles[layerIDs[idx-1]].LayerFiles[modifiedFile]
+				// Something in the mode changed. The only thing we support is removal of setuid/setgid bits
+				setUIDRemoved := previousFileInfo.Mode&fs.ModeSetuid > 0 && modifiedFileInfo.Mode&fs.ModeSetuid == 0
+				setGIDRemoved := previousFileInfo.Mode&fs.ModeSetgid > 0 && modifiedFileInfo.Mode&fs.ModeSetgid == 0
+
+				if setUIDRemoved || setGIDRemoved {
+					logger.V(log.DBG).Info("setuid/setgid bit removed")
+					continue
+				}
+
 				if !strings.Contains(currentPackage.Release, packageDist) && packageDist != "unknown" {
 					// This means it's _probably_ not a RH package. If the file is changed, warn, but don't fail
 					logger.Info("WARN: an rpm-installed file was modified outside of rpm, but appears to be from a third-party. This could be a failure in the future")
@@ -472,8 +485,12 @@ func installedFileMapWithExclusions(ctx context.Context, pkglist []*rpmdb.Packag
 	return m, nil
 }
 
+type fileInfo struct {
+	Mode os.FileMode
+}
+
 // generateChangesFor will check layer for file changes, and will return a list of those.
-func generateChangesFor(ctx context.Context, layer v1.Layer) ([]string, error) {
+func generateChangesFor(ctx context.Context, layer v1.Layer) (map[string]fileInfo, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	layerReader, err := layer.Uncompressed()
 	if err != nil {
@@ -482,7 +499,7 @@ func generateChangesFor(ctx context.Context, layer v1.Layer) ([]string, error) {
 	defer layerReader.Close()
 	tarReader := tar.NewReader(layerReader)
 	// Use a map so we can remove items easily. Will turn this into a string slice before returning
-	filelist := make(map[string]struct{})
+	filelist := make(map[string]fileInfo)
 	var links []string
 	for {
 		header, err := tarReader.Next()
@@ -516,9 +533,9 @@ func generateChangesFor(ctx context.Context, layer v1.Layer) ([]string, error) {
 
 		switch {
 		case (header.Typeflag == tar.TypeDir && tombstone) || header.Typeflag == tar.TypeReg:
-			filelist[strings.TrimPrefix(filepath.Join(dirname, basename), "/")] = struct{}{}
+			filelist[strings.TrimPrefix(filepath.Join(dirname, basename), "/")] = fileInfo{header.FileInfo().Mode()}
 		case header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink:
-			filelist[strings.TrimPrefix(header.Name, "/")] = struct{}{}
+			filelist[strings.TrimPrefix(header.Name, "/")] = fileInfo{header.FileInfo().Mode()}
 			// Add the target to the links slice so we can remove them later
 			links = append(links, strings.TrimPrefix(header.Linkname, "/"))
 		default:
@@ -535,12 +552,7 @@ func generateChangesFor(ctx context.Context, layer v1.Layer) ([]string, error) {
 		delete(filelist, link)
 	}
 
-	keys := make([]string, 0, len(filelist))
-	for k := range filelist {
-		keys = append(keys, k)
-	}
-
-	return keys, nil
+	return filelist, nil
 }
 
 // ExtractRPMDB copies /var/lib/rpm/* from the archive and derives a list of packages from
