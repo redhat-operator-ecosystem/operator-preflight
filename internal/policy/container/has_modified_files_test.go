@@ -3,6 +3,7 @@ package container
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"path"
 
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -18,6 +19,22 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	fileMask            = fs.ModePerm & 0o644
+	fileMaskWithSetuid  = fileMask | fs.ModeSetuid
+	fileMaskWithSetgid  = fileMask | fs.ModeSetgid
+	fileMaskWithBothSet = fileMaskWithSetuid | fileMaskWithSetgid
+)
+
+func deepCopyPackage(pkgs map[string]packageFilesRef) map[string]packageFilesRef {
+	newPkgs := make(map[string]packageFilesRef)
+	for k, v := range pkgs {
+		newPkgs[k] = v
+	}
+
+	return newPkgs
+}
+
 var _ = Describe("HasModifiedFiles", func() {
 	var (
 		hasModifiedFiles HasModifiedFilesCheck
@@ -29,11 +46,12 @@ var _ = Describe("HasModifiedFiles", func() {
 	BeforeEach(func() {
 		pkgRef = make(map[string]packageFilesRef)
 		pkgRef["firstlayer"] = packageFilesRef{
-			LayerFiles: []string{
-				"this",
-				"is",
-				"not",
-				"prohibited",
+			LayerFiles: map[string]fileInfo{
+				"this":       {fileMask},
+				"is":         {fileMask},
+				"not":        {fileMask},
+				"prohibited": {fileMask},
+				"uidgidset":  {fileMaskWithBothSet},
 			},
 			LayerPackages: map[string]packageMeta{
 				"foo-1.0-1.d9": {
@@ -59,20 +77,21 @@ var _ = Describe("HasModifiedFiles", func() {
 				},
 			},
 			LayerPackageFiles: map[string]string{
-				"this": "foo-1.0-1.d9",
-				"is":   "bar-1.0-1.d9",
-				"not":  "baz-2.0-1.d9",
+				"this":      "foo-1.0-1.d9",
+				"is":        "bar-1.0-1.d9",
+				"not":       "baz-2.0-1.d9",
+				"uidgidset": "baz-2.0-1.d9",
 			},
 			HasRPMDB: true,
 		}
 
 		pkgRef["secondlayer"] = packageFilesRef{
-			LayerFiles: []string{
-				"there",
-				"are",
-				"no",
-				"prohibited",
-				"duplicates",
+			LayerFiles: map[string]fileInfo{
+				"there":      {fileMask},
+				"are":        {fileMask},
+				"no":         {fileMask},
+				"prohibited": {fileMask},
+				"duplicates": {fileMask},
 			},
 			LayerPackages: map[string]packageMeta{
 				"foo-1.0-1.d9": {
@@ -105,17 +124,18 @@ var _ = Describe("HasModifiedFiles", func() {
 				},
 			},
 			LayerPackageFiles: map[string]string{
-				"this":  "foo-1.0-1.d9",
-				"is":    "bar-1.0-1.d9",
-				"not":   "baz-2.0-1.d9",
-				"no":    "boz-3.0-1.d9",
-				"there": "boz-3.0-1.d9",
+				"this":      "foo-1.0-1.d9",
+				"is":        "bar-1.0-1.d9",
+				"not":       "baz-2.0-1.d9",
+				"uidgidset": "baz-2.0-1.d9",
+				"no":        "boz-3.0-1.d9",
+				"there":     "boz-3.0-1.d9",
 			},
 			HasRPMDB: true,
 		}
 		pkgRef["lastlayer"] = packageFilesRef{
-			LayerFiles: []string{
-				"prohibited",
+			LayerFiles: map[string]fileInfo{
+				"prohibited": {fileMask},
 			},
 			LayerPackages: map[string]packageMeta{
 				"foo-1.0-1.d9": {
@@ -148,9 +168,10 @@ var _ = Describe("HasModifiedFiles", func() {
 				},
 			},
 			LayerPackageFiles: map[string]string{
-				"this": "foo-1.0-1.d9",
-				"is":   "bar-1.0-1.d9",
-				"not":  "baz-2.0-1.d9",
+				"this":      "foo-1.0-1.d9",
+				"is":        "bar-1.0-1.d9",
+				"not":       "baz-2.0-1.d9",
+				"uidgidset": "baz-2.0-1.d9",
 			},
 		}
 		layers = []string{
@@ -172,21 +193,111 @@ var _ = Describe("HasModifiedFiles", func() {
 		When("there is a modified RPM file found", func() {
 			var pkgs map[string]packageFilesRef
 			BeforeEach(func() {
-				pkgs = pkgRef
-				pkgSecondLayer := pkgRef["secondlayer"]
-				pkgSecondLayer.LayerFiles = append(pkgs["secondlayer"].LayerFiles, "this")
-				pkgs["secondlayer"] = pkgSecondLayer
+				pkgs = deepCopyPackage(pkgRef)
 			})
-			It("should not pass Validate", func() {
-				ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(ok).To(BeFalse())
+			When("only the file is changed", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["this"] = fileInfo{
+						Mode: fileMask,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should not pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeFalse())
+				})
+			})
+			When("setuid is removed", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["uidgidset"] = fileInfo{
+						Mode: fileMaskWithSetgid,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeTrue())
+				})
+			})
+			When("setgid is removed", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["uidgidset"] = fileInfo{
+						Mode: fileMaskWithSetuid,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeTrue())
+				})
+			})
+			When("setuid/setgid are removed", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["uidgidset"] = fileInfo{
+						Mode: fileMask,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeTrue())
+				})
+			})
+			When("setuid is added", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["this"] = fileInfo{
+						Mode: fileMaskWithSetuid,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should not pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeFalse())
+				})
+			})
+			When("setgid is added", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["this"] = fileInfo{
+						Mode: fileMaskWithSetgid,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should not pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeFalse())
+				})
+			})
+			When("setuid/setgid are added", func() {
+				BeforeEach(func() {
+					pkgSecondLayer := pkgs["secondlayer"]
+					pkgSecondLayer.LayerFiles["this"] = fileInfo{
+						Mode: fileMaskWithBothSet,
+					}
+					pkgs["secondlayer"] = pkgSecondLayer
+				})
+				It("should not pass Validate", func() {
+					ok, err := hasModifiedFiles.validate(context.Background(), layers, pkgs, dist)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(ok).To(BeFalse())
+				})
 			})
 		})
 		When("a package is updated", func() {
 			var pkgs map[string]packageFilesRef
 			BeforeEach(func() {
-				pkgs = pkgRef
+				pkgs = deepCopyPackage(pkgRef)
 				pkgSecondLayer := pkgs["secondlayer"]
 				pkgSecondLayerPackageFiles := pkgSecondLayer.LayerPackageFiles
 				pkgSecondLayerPackageFiles["this"] = "foo-2.0-d9"
@@ -202,7 +313,7 @@ var _ = Describe("HasModifiedFiles", func() {
 		When("a package is removed", func() {
 			var pkgs map[string]packageFilesRef
 			BeforeEach(func() {
-				pkgs = pkgRef
+				pkgs = deepCopyPackage(pkgRef)
 				pkgSecondLayer := pkgs["secondlayer"]
 				pkgSecondLayerPackageFiles := pkgSecondLayer.LayerPackageFiles
 				delete(pkgSecondLayerPackageFiles, "this")
@@ -218,7 +329,7 @@ var _ = Describe("HasModifiedFiles", func() {
 		When("the package release dist changes", func() {
 			var pkgs map[string]packageFilesRef
 			BeforeEach(func() {
-				pkgs = pkgRef
+				pkgs = deepCopyPackage(pkgRef)
 
 				pkgSecondLayerPackageFiles := pkgs["secondlayer"].LayerPackageFiles
 				delete(pkgSecondLayerPackageFiles, "this")
@@ -233,10 +344,14 @@ var _ = Describe("HasModifiedFiles", func() {
 					Arch:    "fooarch",
 				}
 
+				pkgSecondLayerFiles := pkgs["secondlayer"].LayerFiles
+				pkgSecondLayerFiles["this"] = fileInfo{
+					Mode: fs.ModePerm,
+				}
 				pkgs["secondlayer"] = packageFilesRef{
 					LayerPackages:     pkgSecondLayerPackages,
 					LayerPackageFiles: pkgSecondLayerPackageFiles,
-					LayerFiles:        append(pkgs["secondlayer"].LayerFiles, "this"),
+					LayerFiles:        pkgSecondLayerFiles,
 					HasRPMDB:          true,
 				}
 			})
@@ -249,7 +364,7 @@ var _ = Describe("HasModifiedFiles", func() {
 		When("the package architecture changes", func() {
 			var pkgs map[string]packageFilesRef
 			BeforeEach(func() {
-				pkgs = pkgRef
+				pkgs = deepCopyPackage(pkgRef)
 
 				pkgSecondLayerPackageFiles := pkgs["secondlayer"].LayerPackageFiles
 				delete(pkgSecondLayerPackageFiles, "this")
@@ -264,10 +379,14 @@ var _ = Describe("HasModifiedFiles", func() {
 					Arch:    "differentarch",
 				}
 
+				pkgSecondLayerFiles := pkgs["secondlayer"].LayerFiles
+				pkgSecondLayerFiles["this"] = fileInfo{
+					Mode: fs.ModePerm,
+				}
 				pkgs["secondlayer"] = packageFilesRef{
 					LayerPackages:     pkgSecondLayerPackages,
 					LayerPackageFiles: pkgSecondLayerPackageFiles,
-					LayerFiles:        append(pkgs["secondlayer"].LayerFiles, "this"),
+					LayerFiles:        pkgSecondLayerFiles,
 					HasRPMDB:          true,
 				}
 			})
@@ -284,7 +403,7 @@ var _ = Describe("HasModifiedFiles", func() {
 					var ctx context.Context
 					var logOutput bytes.Buffer
 					BeforeEach(func() {
-						pkgs = pkgRef
+						pkgs = deepCopyPackage(pkgRef)
 
 						pkgSecondLayerPackages := pkgs["secondlayer"].LayerPackages
 						pkgs["secondlayer"].LayerPackages["other-1.0-1.oth"] = packageMeta{
@@ -295,17 +414,25 @@ var _ = Describe("HasModifiedFiles", func() {
 						}
 						pkgSecondLayerPackageFiles := pkgs["secondlayer"].LayerPackageFiles
 						pkgSecondLayerPackageFiles["otherfile"] = "other-1.0-1.oth"
+						pkgSecondLayerFiles := pkgs["secondlayer"].LayerFiles
+						pkgSecondLayerFiles["otherfile"] = fileInfo{
+							Mode: fs.ModePerm,
+						}
 						pkgs["secondlayer"] = packageFilesRef{
 							LayerPackages:     pkgSecondLayerPackages,
 							LayerPackageFiles: pkgSecondLayerPackageFiles,
-							LayerFiles:        append(pkgs["secondlayer"].LayerFiles, "otherfile"),
+							LayerFiles:        pkgSecondLayerFiles,
 							HasRPMDB:          true,
 						}
 
+						pkgLastLayerFiles := pkgs["lastlayer"].LayerFiles
+						pkgLastLayerFiles["otherfile"] = fileInfo{
+							Mode: fs.ModePerm,
+						}
 						pkgs["lastlayer"] = packageFilesRef{
 							LayerPackages:     pkgs["secondlayer"].LayerPackages,
 							LayerPackageFiles: pkgs["secondlayer"].LayerPackageFiles,
-							LayerFiles:        append(pkgs["lastlayer"].LayerFiles, "otherfile"),
+							LayerFiles:        pkgLastLayerFiles,
 							HasRPMDB:          false,
 						}
 
@@ -330,9 +457,9 @@ var _ = Describe("HasModifiedFiles", func() {
 		var zeroPkgRef map[string]packageFilesRef
 		var zeroLayers []string
 		BeforeEach(func() {
-			zeroPkgRef = pkgRef
+			zeroPkgRef = deepCopyPackage(pkgRef)
 			zeroPkgRef["zerolayer"] = packageFilesRef{
-				LayerFiles:        []string{},
+				LayerFiles:        map[string]fileInfo{},
 				LayerPackages:     make(map[string]packageMeta),
 				LayerPackageFiles: make(map[string]string),
 				HasRPMDB:          false,
