@@ -6,25 +6,38 @@ IMAGE_REPO?=quay.io/opdev
 VERSION=$(shell git rev-parse HEAD)
 RELEASE_TAG ?= "0.0.0"
 
-PLATFORMS=linux
-ARCHITECTURES=amd64 arm64 ppc64le s390x
+PLATFORMS=linux darwin
+ARCHITECTURES_LINUX=amd64 arm64 ppc64le s390x
+ARCHITECTURES_MAC=amd64 arm64
 
 .PHONY: build
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) -ldflags "-X github.com/redhat-openshift-ecosystem/openshift-preflight/version.commit=$(VERSION) -X github.com/redhat-openshift-ecosystem/openshift-preflight/version.version=$(RELEASE_TAG)" cmd/preflight/main.go
 	@ls | grep -e '^preflight$$' &> /dev/null
 
-.PHONY: build-multi-arch
-build-multi-arch: $(addprefix build-linux-,$(ARCHITECTURES))
+.PHONY: build-multi-arch-linux
+build-multi-arch-linux: $(addprefix build-linux-,$(ARCHITECTURES_LINUX))
 
-define ARCHITECTURE_template
+define LINUX_ARCHITECTURE_template
 .PHONY: build-linux-$(1)
 build-linux-$(1):
 	GOOS=linux GOARCH=$(1) CGO_ENABLED=0 go build -o $(BINARY)-linux-$(1) -ldflags "-X github.com/redhat-openshift-ecosystem/openshift-preflight/version.commit=$(VERSION) \
 				-X github.com/redhat-openshift-ecosystem/openshift-preflight/version.version=$(RELEASE_TAG)" cmd/preflight/main.go
 endef
 
-$(foreach arch,$(ARCHITECTURES),$(eval $(call ARCHITECTURE_template,$(arch))))
+$(foreach arch,$(ARCHITECTURES_LINUX),$(eval $(call LINUX_ARCHITECTURE_template,$(arch))))
+
+.PHONY: build-multi-arch-mac
+build-multi-arch-mac: $(addprefix build-mac-,$(ARCHITECTURES_MAC))
+
+define MAC_ARCHITECTURE_template
+.PHONY: build-mac-$(1)
+build-mac-$(1):
+	GOOS=darwin GOARCH=$(1) go build -o $(BINARY)-darwin-$(1) -ldflags "-X github.com/redhat-openshift-ecosystem/openshift-preflight/version.commit=$(VERSION) \
+				-X github.com/redhat-openshift-ecosystem/openshift-preflight/version.version=$(RELEASE_TAG)" cmd/preflight/main.go
+endef
+
+$(foreach arch,$(ARCHITECTURES_MAC),$(eval $(call MAC_ARCHITECTURE_template,$(arch))))
 
 .PHONY: fmt
 fmt: gofumpt
@@ -93,7 +106,10 @@ clean:
 	$(shell if [ -f "$(BINARY)" ]; then rm -f $(BINARY); fi)
 	@# cleans all the binaries created by make build-multi-arch
 	$(foreach GOOS, $(PLATFORMS),\
-	$(foreach GOARCH, $(ARCHITECTURES),\
+	$(foreach GOARCH, $(ARCHITECTURES_LINUX),\
+	$(shell if [ -f "$(BINARY)-$(GOOS)-$(GOARCH)" ]; then rm -f $(BINARY)-$(GOOS)-$(GOARCH); fi)))
+	$(foreach GOOS, $(PLATFORMS),\
+	$(foreach GOARCH, $(ARCHITECTURES_MAC),\
 	$(shell if [ -f "$(BINARY)-$(GOOS)-$(GOARCH)" ]; then rm -f $(BINARY)-$(GOOS)-$(GOARCH); fi)))
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint

@@ -59,3 +59,29 @@ jobs:
         files: ${{ steps.extract.outputs.destination }}/preflight-${{ matrix.platform }}-${{ matrix.architecture }}
         repo-token: ${{ secrets.token }}
         release-tag: ${{ inputs.tag }}
+
+  # an ugly workaround to build binaries for mac.  builds locally and pushes to the release.
+  add-darwin-bins:
+    name: Release binaries for MacOS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Env Tags
+        run: echo RELEASE_TAG=$(echo $GITHUB_REF | cut -d '/' -f 3) >> $GITHUB_ENV
+  
+      - name: Install system deps
+        run: 'sudo apt update && sudo apt install -y libgpgme-dev libbtrfs-dev libdevmapper-dev'
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build Multi-arch-mac
+        run: make build-multi-arch-mac
+
+      - name: Upload binaries to the release
+        uses: AButler/upload-release-assets@v3.0
+        id: upload-release-asset
+        with:
+          files: preflight-darwin-*
+          repo-token: ${{ secrets.token }}
+          release-tag: ${{ inputs.tag }}
