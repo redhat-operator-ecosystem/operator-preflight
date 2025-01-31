@@ -25,4 +25,14 @@ var _ = Describe("Viper tests", func() {
 			})
 		})
 	})
+
+	When("Resetting the project-specific Viper instance", func() {
+		It("should properly clear the instance", func() {
+			packageV := Instance()
+			packageV.Set("foo", "bar")
+			Expect(Instance().Get("foo")).To(Equal("bar"))
+			Reset()
+			Expect(Instance().Get("foo")).To(BeNil())
+		})
+	})
 })

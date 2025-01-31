@@ -72,6 +72,7 @@ var _ = Describe("Check Container Command", func() {
 	var s *httptest.Server
 	var u *url.URL
 	BeforeEach(func() {
+		viper.Reset()
 		manifests = make(map[string]string, 2)
 		// Set up a fake registry.
 		registryLogger := log.New(io.Discard, "", log.Ldate)
@@ -162,24 +163,51 @@ var _ = Describe("Check Container Command", func() {
 
 		DescribeTable("and the user has enabled the submit flag",
 			func(errString string, args []string) {
+				viper.Reset()
 				out, err := executeCommand(checkContainerCmd(mockRunPreflightReturnNil), args...)
 				Expect(err).To(HaveOccurred())
 				Expect(out).To(ContainSubstring(errString))
 			},
-			Entry("certification-project-id and pyxis-api-token are not supplied", "certification Project ID must be specified when --submit is present", []string{"--submit", "foo"}),
-			Entry("pyxis-api-token is not supplied", "pyxis API Token must be specified when --submit is present", []string{"foo", "--submit", "--certification-project-id=fooid"}),
-			Entry("certification-project-id is not supplied", "certification Project ID must be specified when --submit is present", []string{"--submit", "foo", "--pyxis-api-token=footoken"}),
-			Entry("pyxis-api-token flag is present but empty because of '='", "cannot be empty when --submit is present", []string{"foo", "--submit", "--certification-project-id=fooid", "--pyxis-api-token="}),
+			Entry("certification-project-id or certification-component-id and pyxis-api-token are not supplied", "certification component ID must be specified when --submit is present", []string{"--submit", "foo"}),
+			Entry("certification-project-id is supplied and pyxis-api-token is not supplied", "pyxis API Token must be specified when --submit is present", []string{"foo", "--submit", "--certification-project-id=fooid"}),
+			Entry("certification-project-id or certification-component-id is not supplied", "certification component ID must be specified when --submit is present", []string{"--submit", "foo", "--pyxis-api-token=footoken"}),
+			Entry("certification-project-id and pyxis-api-token flag is present but empty because of '='", "cannot be empty when --submit is present", []string{"foo", "--submit", "--certification-project-id=fooid", "--pyxis-api-token="}),
 			Entry("certification-project-id flag is present but empty because of '='", "cannot be empty when --submit is present", []string{"foo", "--submit", "--certification-project-id=", "--pyxis-api-token=footoken"}),
-			Entry("submit is passed after empty api token", "pyxis API token and certification ID are required when --submit is present", []string{"foo", "--certification-project-id=fooid", "--pyxis-api-token", "--submit"}),
-			Entry("submit is passed with explicit value after empty api token", "pyxis API token and certification ID are required when --submit is present", []string{"foo", "--certification-project-id=fooid", "--pyxis-api-token", "--submit=true"}),
-			Entry("submit is passed and insecure is specified", "if any flags in the group [submit insecure] are set", []string{"foo", "--submit", "--insecure", "--certification-project-id=fooid", "--pyxis-api-token=footoken"}),
+			Entry("submit is passed after empty api token with certification-project-id", "pyxis API token and certification component ID are required when --submit is present", []string{"foo", "--certification-project-id=fooid", "--pyxis-api-token", "--submit"}),
+			Entry("certification-project-id and submit is passed with explicit value after empty api token", "pyxis API token and certification component ID are required when --submit is present", []string{"foo", "--certification-project-id=fooid", "--pyxis-api-token", "--submit=true"}),
+			Entry("certification-project-id and submit is passed and insecure is specified", "if any flags in the group [submit insecure] are set", []string{"foo", "--submit", "--insecure", "--certification-project-id=fooid", "--pyxis-api-token=footoken"}),
+			Entry("certification-component-id is supplied and pyxis-api-token is not supplied", "pyxis API Token must be specified when --submit is present", []string{"foo", "--submit", "--certification-component-id=fooid"}),
+			Entry("certification-component-id and pyxis-api-token flag is present but empty because of '='", "cannot be empty when --submit is present", []string{"foo", "--submit", "--certification-component-id=fooid", "--pyxis-api-token="}),
+			Entry("certification-component-id flag is present but empty because of '='", "cannot be empty when --submit is present", []string{"foo", "--submit", "--certification-component-id=", "--pyxis-api-token=footoken"}),
+			Entry("submit is passed after empty api token with certification-component-id", "pyxis API token and certification component ID are required when --submit is present", []string{"foo", "--certification-component-id=fooid", "--pyxis-api-token", "--submit"}),
+			Entry("certification-component-id and submit is passed with explicit value after empty api token", "pyxis API token and certification component ID are required when --submit is present", []string{"foo", "--certification-component-id=fooid", "--pyxis-api-token", "--submit=true"}),
+			Entry("certification-component-id and submit is passed and insecure is specified", "if any flags in the group [submit insecure] are set", []string{"foo", "--submit", "--insecure", "--certification-component-id=fooid", "--pyxis-api-token=footoken"}),
 		)
 
 		When("the user enables the submit flag", func() {
 			When("environment variables are used for certification ID and api token", func() {
 				BeforeEach(func() {
-					os.Setenv("PFLT_CERTIFICATION_PROJECT_ID", "certid")
+					viper.Reset()
+					initConfig(viper.Instance())
+					os.Setenv("PFLT_CERTIFICATION_COMPONENT_ID", "certcompenvid")
+					os.Setenv("PFLT_PYXIS_API_TOKEN", "tokenid")
+					DeferCleanup(os.Unsetenv, "PFLT_CERTIFICATION_COMPONENT_ID")
+					DeferCleanup(os.Unsetenv, "PFLT_PYXIS_API_TOKEN")
+				})
+				It("should still execute with no error", func() {
+					submit = true
+
+					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+					Expect(err).ToNot(HaveOccurred())
+					Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("tokenid"))
+					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("certcompenvid"))
+				})
+			})
+			When("old environment variable is used for certification ID", func() {
+				BeforeEach(func() {
+					viper.Reset()
+					initConfig(viper.Instance())
+					os.Setenv("PFLT_CERTIFICATION_PROJECT_ID", "certprojenvid")
 					os.Setenv("PFLT_PYXIS_API_TOKEN", "tokenid")
 					DeferCleanup(os.Unsetenv, "PFLT_CERTIFICATION_PROJECT_ID")
 					DeferCleanup(os.Unsetenv, "PFLT_PYXIS_API_TOKEN")
@@ -190,35 +218,47 @@ var _ = Describe("Check Container Command", func() {
 					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
 					Expect(err).ToNot(HaveOccurred())
 					Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("tokenid"))
-					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("certid"))
+					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("certprojenvid"))
 				})
 			})
 			When("a config file is used", func() {
-				BeforeEach(func() {
-					config := `pyxis_api_token: mytoken
-certification_project_id: mycertid`
-					tempDir, err := os.MkdirTemp("", "check-container-submit-*")
-					Expect(err).ToNot(HaveOccurred())
-					err = os.WriteFile(filepath.Join(tempDir, "config.yaml"), bytes.NewBufferString(config).Bytes(), 0o644)
-					Expect(err).ToNot(HaveOccurred())
-					viper.Instance().AddConfigPath(tempDir)
-					DeferCleanup(os.RemoveAll, tempDir)
-				})
-				It("should still execute with no error", func() {
-					// Make sure that we've read the config file
-					initConfig(viper.Instance())
-					submit = true
+				When("the deprecated certification_project_id config file is used", func() {
+					JustBeforeEach(func() {
+						viper.Reset()
+						viper.Instance().AddConfigPath("testdata/project/")
+					})
+					It("should still execute with no error", func() {
+						// Make sure that we've read the config file
+						initConfig(viper.Instance())
+						submit = true
 
-					err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
-					Expect(err).ToNot(HaveOccurred())
-					Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("mytoken"))
-					Expect(viper.Instance().GetString("certification_project_id")).To(Equal("mycertid"))
+						err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+						Expect(err).ToNot(HaveOccurred())
+						Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("mytoken"))
+						Expect(viper.Instance().GetString("certification_project_id")).To(Equal("myprojectid"))
+					})
+				})
+				When("certification_component_id config file is used", func() {
+					JustBeforeEach(func() {
+						viper.Reset()
+						viper.Instance().AddConfigPath("testdata/component/")
+					})
+					It("should still execute with no error", func() {
+						// Make sure that we've read the config file
+						initConfig(viper.Instance())
+						submit = true
+
+						err := checkContainerPositionalArgs(checkContainerCmd(mockRunPreflightReturnNil), []string{"foo"})
+						Expect(err).ToNot(HaveOccurred())
+						Expect(viper.Instance().GetString("pyxis_api_token")).To(Equal("mytoken"))
+						Expect(viper.Instance().GetString("certification_project_id")).To(Equal("mycomponentcertid"))
+					})
 				})
 			})
 		})
 	})
 
-	Context("When validating the certification-project-id flag", func() {
+	Context("When validating the certification-component-id flag", func() {
 		Context("and the flag is set properly", func() {
 			BeforeEach(func() {
 				viper.Instance().Set("certification_project_id", "123456789")

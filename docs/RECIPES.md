@@ -147,10 +147,10 @@ These examples are shown using the Container policy against a container image
 You will also need:
 - Your container image published to a container registry
   - An example would be `quay.io/repo-name/container-name:version`
-- A Certification Project ID of the project that was set up in Red Hat Partner Connect
+- A Certification Component ID of the component that was set up in Red Hat Partner Connect
   - This value can be obtained from the Overview page's URL
-    - For the following example Overview URL of `https://connect.redhat.com/projects/1234567890aabbccddeeffgg/overview`
-      - The Certification Project ID would be: `1234567890aabbccddeeffgg`
+    - For the following example Overview URL of `https://connect.redhat.com/components/1234567890aabbccddeeffgg/overview`
+      - The Certification Component ID would be: `1234567890aabbccddeeffgg`
   - Required for submit
 - A Partner Connect API Key
   - An API Key can be created in Red Hat Partner Connect at the following [URL](https://connect.redhat.com/account/api-keys)
@@ -174,7 +174,7 @@ Running container policy checks against a container that has passed all tests an
 preflight check container registry.example.org/your-namespace/your-image:sometag \
 --submit \
 --pyxis-api-token=abcdefghijklmnopqrstuvwxyz123456 \
---certification-project-id=1234567890a987654321bcde \
+--certification-component-id=1234567890a987654321bcde \
 --docker-config=/path/to/your/dockerconfig 
 ```
 
@@ -188,7 +188,7 @@ loglevel: trace
 logfile: artifacts/preflight.log
 artifacts: artifacts
 junit: true
-certification_project_id: my_nice_project_id
+certification_component_id: my_nice_component_id
 pyxis_api_token: my_nice_token
 ```
 
@@ -208,7 +208,7 @@ artifacts and logfiles to be written by using the `PFLT_ARTIFACTS` and
 `PFLT_LOGFILE` environment variables. Then we bind host volumes to these
 locations so that the data will be preserved when the container completes (the
 container will be deleted after completion due to the `--rm` flag). We also make
-the assumption that the user would like to submit results to Red Hat; meaning `PFLT_CERTIFICATION_PROJECT_ID`,
+the assumption that the user would like to submit results to Red Hat; meaning `PFLT_CERTIFICATION_COMPONENT_ID`,
 `PFLT_PYXIS_API_TOKEN` and `PFLT_DOCKERCONFIG` need to be provided. **Note:** The docker config
 provided to the `PFLT_DOCKERCONFIG` environment should be from the following command:
 `podman login --username [USERNAME] --password [PASSWORD] --authfile ./temp-authfile.json [REGISTRY]`
@@ -222,7 +222,7 @@ $CONTAINER_TOOL run \
   --env PFLT_LOGLEVEL=trace \
   --env PFLT_ARTIFACTS=/artifacts \
   --env PFLT_LOGFILE=/artifacts/preflight.log \
-  --env PFLT_CERTIFICATION_PROJECT_ID=1234567890a987654321bcde \
+  --env PFLT_CERTIFICATION_COMPONENT_ID=1234567890a987654321bcde \
   --env PFLT_PYXIS_API_TOKEN=abcdefghijklmnopqrstuvwxyz123456 \
   --env PFLT_DOCKERCONFIG=/temp-authfile.json \
   -v /some/path/on/your/host/artifacts:/artifacts \

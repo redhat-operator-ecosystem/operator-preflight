@@ -27,3 +27,11 @@ func Instance() *spfviper.Viper {
 	}
 	return instance
 }
+
+// Reset creates a new Viper instance. This should really only be used
+// for testing purposes.
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	instance = spfviper.New()
+}
