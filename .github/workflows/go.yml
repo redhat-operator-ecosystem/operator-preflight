@@ -41,5 +41,8 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         file: coverage.out
 
-    - name: Build Multi-arch
-      run: make build-multi-arch
+    - name: Build Multi-arch-linux
+      run: make build-multi-arch-linux
+
+    - name: Build Multi-arch-mac
+      run: make build-multi-arch-mac
